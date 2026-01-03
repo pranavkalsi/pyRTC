@@ -9,6 +9,7 @@ from OOPAO.Atmosphere import Atmosphere
 from OOPAO.DeformableMirror import DeformableMirror
 from OOPAO.MisRegistration import MisRegistration
 from OOPAO.Pyramid import Pyramid
+from OOPAO.ShackHartmann import ShackHartmann
 from OOPAO.Source import Source
 from OOPAO.Telescope import Telescope
 from OOPAO.calibration.ao_calibration import ao_calibration
@@ -102,9 +103,32 @@ class _OOPAOScienceCamera(ScienceCamera):
         # #Add current dm state to the telescope
         self.src*self.tel#*self.dm
         #Compute PSF
-        self.tel.computePSF(zeroPaddingFactor=5)#, N_crop=136)
+        self.tel.computePSF(zeroPaddingFactor=self.zeropadding)#, N_crop=136)
+        crop_factor = self.cropfactor
+        if crop_factor <= 0:
+            raise ValueError("crop_factor must be > 0")
+
+        H, W = self.tel.PSF.shape
+
+        out_H = int(round(H / crop_factor))
+        out_W = int(round(W / crop_factor))
+
+        if out_H <= 0 or out_W <= 0:
+            raise ValueError("crop_factor too large")
+
+        #True center (works for even & odd sizes)
+        cH = (H - 1) / 2
+        cW = (W - 1) / 2
+
+        # Start indices so that centers coincide
+        start_H = int(round(cH - (out_H - 1) / 2))
+        start_W = int(round(cW - (out_W - 1) / 2))
+
+        end_H = start_H + out_H
+        end_W = start_W + out_W
+
         #Check that we still have the right source coupled
-        psfImg = self.tel.PSF_norma.copy()
+        psfImg = self.tel.PSF.copy()[start_H:end_H,start_W:end_W]  #psfImg = self.tel.PSF_norma.copy()
         psfImg[psfImg > 65536] = 65536
         self.data = (psfImg).astype(np.uint16)
         
@@ -142,19 +166,19 @@ class OOPAOInterface():
                         samplingTime        = param['samplingTime'],
                         centralObstruction  = param['centralObstruction'])
         
-        #A second copy of the telescope so that the PSF camera is fighting with the
+        #A second copy of the telescope so that the PSF camera is not fighting with the
         #Wavefront Sensor
         self.tel_psf = Telescope(resolution     = param['resolution'],
                 diameter            = param['diameter'],
                 samplingTime        = param['samplingTime'],
                 centralObstruction  = param['centralObstruction'])
         
-        self.src = Source(optBand   = param["sourceBand"], 
-                          magnitude = param['magnitude'])
+        self.src = Source(optBand   = param["scienceBand"], 
+                          magnitude = param['scienceMagnitude'])
         self.src*self.tel_psf
 
         #Create a guide star
-        self.ngs = Source(optBand = param['opticalBand'], magnitude = param['magnitude'])
+        self.ngs = Source(optBand = param['NGSband'], magnitude = param['NGSmagnitude'])
         self.ngs*self.tel
 
         self.atm = Atmosphere(telescope     = self.tel,\
@@ -169,14 +193,30 @@ class OOPAOInterface():
                                         nSubap         = param['nSubaperture'], 
                                         mechCoupling   = param['mechanicalCoupling'])
 
+        if param['wfs_type'] == 'PYWFS':
+            self.wfs = Pyramid(nSubap         = param['nSubaperture'],
+                               telescope             = self.tel,
+                               modulation            = param['modulation'],
+                               lightRatio            = param['lightThreshold'],
+                               n_pix_separation      = param['n_pix_separation'],
+                               psfCentering          = param['psfCentering'],
+                               postProcessing        = param['postProcessing'])
+        else:
+            self.wfs = ShackHartmann(nSubap    =param['nSubaperture'],
+                                    telescope =self.tel,
+                                    lightRatio =param['lightThreshold'],
+                                    binning_factor=1,
+                                    is_geometric = param['is_geometric'],
+                                    shannon_sampling=True)
+
         # create the Pyramid WFS Object
-        self.wfs = Pyramid(nSubap         = param['nSubaperture'],
-                    telescope             = self.tel,
-                    modulation            = param['modulation'],
-                    lightRatio            = param['lightThreshold'],
-                    n_pix_separation      = param['n_pix_separation'],
-                    psfCentering          = param['psfCentering'],
-                    postProcessing        = param['postProcessing'])
+        # self.wfs = Pyramid(nSubap         = param['nSubaperture'],
+        #             telescope             = self.tel,
+        #             modulation            = param['modulation'],
+        #             lightRatio            = param['lightThreshold'],
+        #             n_pix_separation      = param['n_pix_separation'],
+        #             psfCentering          = param['psfCentering'],
+        #             postProcessing        = param['postProcessing'])
         
         #Initialize the atmosphere
         self.atm.initializeAtmosphere(self.tel)
@@ -221,7 +261,7 @@ def _initializeDummyParameterFile():
     param['windSpeed'            ] = [10,12,11,15,20]                               # wind speed of the different layers in [m.s-1]
     param['windDirection'        ] = [0,72,144,216,288]                             # wind direction of the different layers in [degrees]
     param['altitude'             ] = [0, 1000,5000,10000,12000 ]                    # altitude of the different layers in [m]
-                    
+               
     ###%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% M1 PROPERTIES %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     
     param['diameter'             ] = 8                                              # diameter in [m]
@@ -236,10 +276,10 @@ def _initializeDummyParameterFile():
           
     ###%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% NGS PROPERTIES %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     
-    param['magnitude'            ] = 8                                              # magnitude of the guide star
-    param['opticalBand'          ] = 'R'                                            # optical band of the guide star
-    param['sourceBand'          ] = 'J'
-
+    param['scienceMagnitude'            ] = 8                                              # magnitude of the guide star
+    param['scienceBand'          ] = 'R'                                            # optical band of the guide star
+    param['NGSband'          ] = 'J'
+    param['NGSmagnitude']      =  6   
     ###%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% DM PROPERTIES %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     param['nActuator'            ] = param['nSubaperture']+1                        # number of actuators 
     param['mechanicalCoupling'   ] = 0.45
@@ -261,23 +301,24 @@ def _initializeDummyParameterFile():
     param['psfCentering'          ] = False                                         # centering of the FFT and of the PWFS mask on the 4 central pixels
     param['lightThreshold'        ] = 0.1                                           # light threshold to select the valid pixels
     param['postProcessing'        ] = 'slopesMaps'                                  # post-processing of the PWFS signals 
+    param['wfs_type'] = 'PYWFS'
     
     ###%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% OUTPUT DATA %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
     # name of the system
-    param['name'] = 'VLT_' +  param['opticalBand'] +'_band_'+ str(param['nSubaperture'])+'x'+ str(param['nSubaperture'])  
+#    param['name'] = 'VLT_' +  param['opticalBand'] +'_band_'+ str(param['nSubaperture'])+'x'+ str(param['nSubaperture'])  
     
     # location of the calibration data
-    param['pathInput'            ] = 'data_calibration/' 
+  #  param['pathInput'            ] = 'data_calibration/' 
     
     # location of the output data
-    param['pathOutput'            ] = 'data_cl/'
+  #  param['pathOutput'            ] = 'data_cl/'
     
 
-    print('Reading/Writting calibration data from ' + param['pathInput'])
-    print('Writting output data in ' + param['pathOutput'])
+  #  print('Reading/Writting calibration data from ' + param['pathInput'])
+  #  print('Writting output data in ' + param['pathOutput'])
 
-    createFolder(param['pathOutput'])
+ #   createFolder(param['pathOutput'])
     
     return param
 
