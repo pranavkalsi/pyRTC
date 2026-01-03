@@ -91,7 +91,7 @@ class ScienceCamera(pyRTCComponent):
     def __init__(self, conf) -> None:
 
         self.name = conf["name"]
-        self.imageShape = (conf["width"], conf["height"])
+        self.imageShape = (conf["width"], conf["height"]) # note that these height and width are after zero padding adjustment
         self.imageRawDType = np.uint16
         self.imageDType = np.int32
         self.psfLongDtype = np.float64
@@ -109,7 +109,8 @@ class ScienceCamera(pyRTCComponent):
         self.modelFile = setFromConfig(conf, "modelFile", "")
         self.strehl_ratio = 0
         self.peak_dist = 0
-
+        self.zeropadding = conf["zeropadding"]
+        self.cropfactor = conf["cropfactor"]
         self.loadDark()
         self.loadModelPSF()
 
