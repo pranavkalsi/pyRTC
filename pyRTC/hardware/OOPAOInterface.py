@@ -107,7 +107,7 @@ class _OOPAOScienceCamera(ScienceCamera):
         crop_factor = self.cropfactor
         if crop_factor <= 0:
             raise ValueError("crop_factor must be > 0")
-
+        
         H, W = self.tel.PSF.shape
 
         out_H = int(round(H / crop_factor))
@@ -129,7 +129,7 @@ class _OOPAOScienceCamera(ScienceCamera):
 
         #Check that we still have the right source coupled
         psfImg = self.tel.PSF.copy()[start_H:end_H,start_W:end_W]  #psfImg = self.tel.PSF_norma.copy()
-        psfImg[psfImg > 65536] = 65536
+        psfImg[psfImg > 65535] = 65535
         self.data = (psfImg).astype(np.uint16)
         
         super().expose()
@@ -207,7 +207,8 @@ class OOPAOInterface():
                                     lightRatio =param['lightThreshold'],
                                     binning_factor=1,
                                     is_geometric = param['is_geometric'],
-                                    shannon_sampling=True)
+                                    shannon_sampling=True,
+                                    n_pixel_per_subaperture = param['n_pixel_per_subaperture'])
 
         # create the Pyramid WFS Object
         # self.wfs = Pyramid(nSubap         = param['nSubaperture'],

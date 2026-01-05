@@ -10,7 +10,7 @@ import tqdm
 # %% Measure Jitter
 TAG = 'predict'
 WFS = "SHWFS"
-Naps = 22
+Naps = 10
 if WFS == "PYWFS":
     Naps = 64
 shm1, _, _ = initExistingShm("wfsRaw")

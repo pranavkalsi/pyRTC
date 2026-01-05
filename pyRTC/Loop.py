@@ -368,7 +368,7 @@ class Loop(pyRTCComponent):
 
             #Compute the normalized difference
             self.IM[:,i] = (tmp_plus-tmp_minus)/(2*self.pokeAmp)
-
+            correction = self.flat.copy()
         return
     
     def docrimeIM(self):
